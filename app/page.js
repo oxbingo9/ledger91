@@ -1,9 +1,10 @@
 
 
+
 "use client";
 import { useEffect, useState } from "react";
 import { initializeApp, getApps } from "firebase/app";
-import { getFirestore, collection, getDocs, addDoc, query, where } from "firebase/firestore";
+import { getFirestore, collection, getDocs, addDoc, deleteDoc, doc, query, where } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBi82idZAraoDMEMVBhVv66tURB0lSI0UM",
@@ -15,7 +16,6 @@ const firebaseConfig = {
   appId: "1:747494068723:web:67fe836743fb16f89f8286",
   measurementId: "G-LWQ95J4B1B"
 };
-
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 const db = getFirestore(app);
@@ -38,7 +38,6 @@ export default function Home() {
   const [outForm, setOutForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
-  // insa 로드
   useEffect(() => {
     async function fetchInsa() {
       setLoading(true);
@@ -51,13 +50,12 @@ export default function Home() {
     fetchInsa();
   }, [selectedYear]);
 
-  // data 로드
   async function fetchItems() {
     try {
       const snapshot = await getDocs(collection(db, "data"));
-      const all = snapshot.docs.map(doc => doc.data());
+      // doc ID도 함께 저장
+      const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       const filtered = all.filter(item => String(item.DATE).includes(selectedYear));
-      // 날짜 오름차순 정렬
       filtered.sort((a, b) => new Date(a.DATE) - new Date(b.DATE));
       setItems(filtered);
     } catch (e) { console.error(e); }
@@ -80,7 +78,6 @@ export default function Home() {
     setIsAdmin(val === serverPw && serverPw !== "");
   }
 
-  // 저장
   async function handleSave(type) {
     const form = type === "입금" ? inForm : outForm;
     if (!form.date || !form.desc || !form.amt) {
@@ -99,6 +96,14 @@ export default function Home() {
       await fetchItems();
     } catch (e) { alert("저장 실패: " + e.message); }
     finally { setSaving(false); }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm("삭제하시겠습니까?")) return;
+    try {
+      await deleteDoc(doc(db, "data", id));
+      await fetchItems();
+    } catch (e) { alert("삭제 실패: " + e.message); }
   }
 
   const inItems = items.filter(i => i.TYPE === "입금");
@@ -121,7 +126,8 @@ export default function Home() {
         .insa-info { font-size: 11px; color: #666; text-align: right; line-height: 1.8; }
         .frame { background: white; border-radius: 12px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 15px; }
         .frame-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-        .frame-title { font-weight: bold; color: #444; }
+        .frame-title-in { font-weight: bold; color: #28a745; }
+        .frame-title-out { font-weight: bold; color: #dc3545; }
         .add-btn { background: #007bff; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; font-size: 20px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
         select { font-size: 20px; font-weight: bold; color: #007bff; border: 2px solid #007bff; padding: 8px 15px; border-radius: 8px; cursor: pointer; background: #fff; min-width: 120px; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
@@ -130,6 +136,9 @@ export default function Home() {
         .col-date { width: 55px; text-align: center; color: #888; }
         .col-desc { text-align: left; padding-left: 10px; }
         .col-amt { width: 85px; text-align: right; font-weight: 500; }
+        .col-del { width: 30px; text-align: center; }
+        .del-btn { background: none; border: none; color: #ccc; font-size: 16px; cursor: pointer; padding: 0; line-height: 1; }
+        .del-btn:hover { color: #ff4d4d; }
         .plus { color: #28a745; }
         .minus { color: #dc3545; }
         .empty { color: #aaa; font-size: 12px; text-align: center; padding: 15px 0; }
@@ -140,7 +149,6 @@ export default function Home() {
         .loading { text-align: center; padding: 40px; color: #aaa; }
         .input-form { background: #f9f9f9; border: 1px solid #eee; border-radius: 8px; padding: 12px; margin-top: 12px; }
         .input-form input { width: 100%; padding: 9px 10px; margin-bottom: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; font-family: inherit; }
-        .input-form input:last-child { margin-bottom: 0; }
         .form-btns { display: flex; gap: 8px; margin-top: 8px; }
         .btn-save { flex: 1; background: #007bff; color: white; border: none; border-radius: 6px; padding: 10px; font-size: 14px; font-family: inherit; cursor: pointer; }
         .btn-cancel { flex: 1; background: #eee; color: #555; border: none; border-radius: 6px; padding: 10px; font-size: 14px; font-family: inherit; cursor: pointer; }
@@ -151,7 +159,7 @@ export default function Home() {
         {/* 헤더 */}
         <div className="header">
           <div>
-            <div className="header-title">LEDGER 91</div>
+            <div className="header-title">Simple Ledger91</div>
             <div className="header-h1">구일회비관리</div>
           </div>
           <div className="insa-info">
@@ -173,7 +181,7 @@ export default function Home() {
           {/* 입금내역 */}
           <div className="frame">
             <div className="frame-header">
-              <div className="frame-title">↓ 입금내역</div>
+              <div className="frame-title-in">↓ 입금내역</div>
               {isAdmin && <button className="add-btn" onClick={() => setShowInForm(!showInForm)}>+</button>}
             </div>
             {showInForm && (
@@ -188,15 +196,23 @@ export default function Home() {
               </div>
             )}
             <table>
-              <thead><tr><th className="col-date">날짜</th><th className="col-desc">내용</th><th className="col-amt">금액</th></tr></thead>
+              <thead>
+                <tr>
+                  <th className="col-date">날짜</th>
+                  <th className="col-desc">내용</th>
+                  <th className="col-amt">금액</th>
+                  {isAdmin && <th className="col-del"></th>}
+                </tr>
+              </thead>
               <tbody>
                 {inItems.length === 0
-                  ? <tr><td colSpan={3} className="empty">내역 없음</td></tr>
-                  : inItems.map((item, i) => (
-                    <tr key={i}>
+                  ? <tr><td colSpan={isAdmin ? 4 : 3} className="empty">내역 없음</td></tr>
+                  : inItems.map((item) => (
+                    <tr key={item.id}>
                       <td className="col-date">{formatDate(item.DATE)}</td>
                       <td className="col-desc">{item.DESC}</td>
                       <td className="col-amt plus">{Number(item.AMT).toLocaleString()}</td>
+                      {isAdmin && <td className="col-del"><button className="del-btn" onClick={() => handleDelete(item.id)}>✕</button></td>}
                     </tr>
                   ))
                 }
@@ -207,7 +223,7 @@ export default function Home() {
           {/* 출금내역 */}
           <div className="frame">
             <div className="frame-header">
-              <div className="frame-title">↑ 출금내역</div>
+              <div className="frame-title-out">↑ 출금내역</div>
               {isAdmin && <button className="add-btn" onClick={() => setShowOutForm(!showOutForm)}>+</button>}
             </div>
             {showOutForm && (
@@ -222,15 +238,23 @@ export default function Home() {
               </div>
             )}
             <table>
-              <thead><tr><th className="col-date">날짜</th><th className="col-desc">내용</th><th className="col-amt">금액</th></tr></thead>
+              <thead>
+                <tr>
+                  <th className="col-date">날짜</th>
+                  <th className="col-desc">내용</th>
+                  <th className="col-amt">금액</th>
+                  {isAdmin && <th className="col-del"></th>}
+                </tr>
+              </thead>
               <tbody>
                 {outItems.length === 0
-                  ? <tr><td colSpan={3} className="empty">내역 없음</td></tr>
-                  : outItems.map((item, i) => (
-                    <tr key={i}>
+                  ? <tr><td colSpan={isAdmin ? 4 : 3} className="empty">내역 없음</td></tr>
+                  : outItems.map((item) => (
+                    <tr key={item.id}>
                       <td className="col-date">{formatDate(item.DATE)}</td>
                       <td className="col-desc">{item.DESC}</td>
                       <td className="col-amt minus">{Number(item.AMT).toLocaleString()}</td>
+                      {isAdmin && <td className="col-del"><button className="del-btn" onClick={() => handleDelete(item.id)}>✕</button></td>}
                     </tr>
                   ))
                 }
