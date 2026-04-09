@@ -3,7 +3,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { initializeApp, getApps } from "firebase/app";
-import { getFirestore, collection, getDocs, query, where } from "firebase/firestore";
+import { getFirestore, collection, getDocs, addDoc, query, where } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBi82idZAraoDMEMVBhVv66tURB0lSI0UM",
@@ -16,8 +16,11 @@ const firebaseConfig = {
   measurementId: "G-LWQ95J4B1B"
 };
 
+
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 const db = getFirestore(app);
+
+const EMPTY_FORM = { date: "", desc: "", amt: "" };
 
 export default function Home() {
   const currentYear = new Date().getFullYear();
@@ -29,39 +32,38 @@ export default function Home() {
   const [pw, setPw] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showInForm, setShowInForm] = useState(false);
+  const [showOutForm, setShowOutForm] = useState(false);
+  const [inForm, setInForm] = useState(EMPTY_FORM);
+  const [outForm, setOutForm] = useState(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
 
+  // insa 로드
   useEffect(() => {
     async function fetchInsa() {
       setLoading(true);
       try {
         const snapshot = await getDocs(query(collection(db, "insa"), where("YEAR", "==", Number(selectedYear))));
-        if (!snapshot.empty) {
-          setInsa(snapshot.docs[0].data());
-        } else {
-          setInsa(null);
-        }
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
+        setInsa(!snapshot.empty ? snapshot.docs[0].data() : null);
+      } catch (e) { console.error(e); }
+      finally { setLoading(false); }
     }
     fetchInsa();
   }, [selectedYear]);
 
-  useEffect(() => {
-    async function fetchItems() {
-      try {
-        const snapshot = await getDocs(collection(db, "data"));
-        const all = snapshot.docs.map(doc => doc.data());
-        const filtered = all.filter(item => String(item.DATE).includes(selectedYear));
-        setItems(filtered);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    fetchItems();
-  }, [selectedYear]);
+  // data 로드
+  async function fetchItems() {
+    try {
+      const snapshot = await getDocs(collection(db, "data"));
+      const all = snapshot.docs.map(doc => doc.data());
+      const filtered = all.filter(item => String(item.DATE).includes(selectedYear));
+      // 날짜 오름차순 정렬
+      filtered.sort((a, b) => new Date(a.DATE) - new Date(b.DATE));
+      setItems(filtered);
+    } catch (e) { console.error(e); }
+  }
+
+  useEffect(() => { fetchItems(); }, [selectedYear]);
 
   function formatDate(dateStr) {
     try {
@@ -69,15 +71,34 @@ export default function Home() {
       const m = String(d.getMonth() + 1).padStart(2, "0");
       const day = String(d.getDate()).padStart(2, "0");
       return `${m}/${day}`;
-    } catch {
-      return dateStr;
-    }
+    } catch { return dateStr; }
   }
 
   function checkAdmin(val) {
     setPw(val);
     const serverPw = insa ? String(insa.PWD || "") : "";
     setIsAdmin(val === serverPw && serverPw !== "");
+  }
+
+  // 저장
+  async function handleSave(type) {
+    const form = type === "입금" ? inForm : outForm;
+    if (!form.date || !form.desc || !form.amt) {
+      alert("날짜, 내용, 금액을 모두 입력해주세요."); return;
+    }
+    setSaving(true);
+    try {
+      await addDoc(collection(db, "data"), {
+        DATE: new Date(form.date).toString(),
+        TYPE: type,
+        DESC: form.desc,
+        AMT: Number(String(form.amt).replace(/,/g, "")),
+      });
+      if (type === "입금") { setInForm(EMPTY_FORM); setShowInForm(false); }
+      else { setOutForm(EMPTY_FORM); setShowOutForm(false); }
+      await fetchItems();
+    } catch (e) { alert("저장 실패: " + e.message); }
+    finally { setSaving(false); }
   }
 
   const inItems = items.filter(i => i.TYPE === "입금");
@@ -99,7 +120,9 @@ export default function Home() {
         .header-h1 { font-size: 22px; font-weight: bold; color: #1a1a1a; margin-top: 2px; }
         .insa-info { font-size: 11px; color: #666; text-align: right; line-height: 1.8; }
         .frame { background: white; border-radius: 12px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 15px; }
-        .frame-title { font-weight: bold; color: #444; margin-bottom: 10px; }
+        .frame-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .frame-title { font-weight: bold; color: #444; }
+        .add-btn { background: #007bff; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; font-size: 20px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
         select { font-size: 20px; font-weight: bold; color: #007bff; border: 2px solid #007bff; padding: 8px 15px; border-radius: 8px; cursor: pointer; background: #fff; min-width: 120px; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
         th { background: #f8f9fa; border-bottom: 2px solid #dee2e6; color: #666; font-weight: bold; padding: 10px 5px; }
@@ -115,9 +138,17 @@ export default function Home() {
         .footer { margin-top: 20px; text-align: center; padding-bottom: 30px; }
         input[type=password] { padding: 10px; width: 140px; border: 1px solid #ddd; border-radius: 6px; text-align: center; font-size: 14px; }
         .loading { text-align: center; padding: 40px; color: #aaa; }
+        .input-form { background: #f9f9f9; border: 1px solid #eee; border-radius: 8px; padding: 12px; margin-top: 12px; }
+        .input-form input { width: 100%; padding: 9px 10px; margin-bottom: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; font-family: inherit; }
+        .input-form input:last-child { margin-bottom: 0; }
+        .form-btns { display: flex; gap: 8px; margin-top: 8px; }
+        .btn-save { flex: 1; background: #007bff; color: white; border: none; border-radius: 6px; padding: 10px; font-size: 14px; font-family: inherit; cursor: pointer; }
+        .btn-cancel { flex: 1; background: #eee; color: #555; border: none; border-radius: 6px; padding: 10px; font-size: 14px; font-family: inherit; cursor: pointer; }
+        .btn-save:disabled { opacity: 0.6; cursor: not-allowed; }
       `}</style>
 
       <div className="wrap">
+        {/* 헤더 */}
         <div className="header">
           <div>
             <div className="header-title">LEDGER 91</div>
@@ -129,17 +160,33 @@ export default function Home() {
           </div>
         </div>
 
+        {/* 기준년도 */}
         <div className="frame">
           <span style={{fontWeight:"bold", color:"#666", marginRight:"10px"}}>기준년도</span>
-          <select value={selectedYear} onChange={e => { setSelectedYear(e.target.value); setIsAdmin(false); setPw(""); }}>
+          <select value={selectedYear} onChange={e => { setSelectedYear(e.target.value); setIsAdmin(false); setPw(""); setShowInForm(false); setShowOutForm(false); }}>
             {years.map(y => <option key={y} value={String(y)}>{y}년</option>)}
           </select>
         </div>
 
         {loading ? <div className="loading">불러오는 중...</div> : <>
 
+          {/* 입금내역 */}
           <div className="frame">
-            <div className="frame-title">↓ 입금내역</div>
+            <div className="frame-header">
+              <div className="frame-title">↓ 입금내역</div>
+              {isAdmin && <button className="add-btn" onClick={() => setShowInForm(!showInForm)}>+</button>}
+            </div>
+            {showInForm && (
+              <div className="input-form">
+                <input type="date" value={inForm.date} onChange={e => setInForm({...inForm, date: e.target.value})} />
+                <input type="text" placeholder="내용" value={inForm.desc} onChange={e => setInForm({...inForm, desc: e.target.value})} />
+                <input type="number" placeholder="금액" value={inForm.amt} onChange={e => setInForm({...inForm, amt: e.target.value})} />
+                <div className="form-btns">
+                  <button className="btn-save" onClick={() => handleSave("입금")} disabled={saving}>{saving ? "저장중..." : "저장"}</button>
+                  <button className="btn-cancel" onClick={() => { setShowInForm(false); setInForm(EMPTY_FORM); }}>취소</button>
+                </div>
+              </div>
+            )}
             <table>
               <thead><tr><th className="col-date">날짜</th><th className="col-desc">내용</th><th className="col-amt">금액</th></tr></thead>
               <tbody>
@@ -157,8 +204,23 @@ export default function Home() {
             </table>
           </div>
 
+          {/* 출금내역 */}
           <div className="frame">
-            <div className="frame-title">↑ 출금내역</div>
+            <div className="frame-header">
+              <div className="frame-title">↑ 출금내역</div>
+              {isAdmin && <button className="add-btn" onClick={() => setShowOutForm(!showOutForm)}>+</button>}
+            </div>
+            {showOutForm && (
+              <div className="input-form">
+                <input type="date" value={outForm.date} onChange={e => setOutForm({...outForm, date: e.target.value})} />
+                <input type="text" placeholder="내용" value={outForm.desc} onChange={e => setOutForm({...outForm, desc: e.target.value})} />
+                <input type="number" placeholder="금액" value={outForm.amt} onChange={e => setOutForm({...outForm, amt: e.target.value})} />
+                <div className="form-btns">
+                  <button className="btn-save" onClick={() => handleSave("출금")} disabled={saving}>{saving ? "저장중..." : "저장"}</button>
+                  <button className="btn-cancel" onClick={() => { setShowOutForm(false); setOutForm(EMPTY_FORM); }}>취소</button>
+                </div>
+              </div>
+            )}
             <table>
               <thead><tr><th className="col-date">날짜</th><th className="col-desc">내용</th><th className="col-amt">금액</th></tr></thead>
               <tbody>
@@ -176,6 +238,7 @@ export default function Home() {
             </table>
           </div>
 
+          {/* 잔액 */}
           <div className="frame">
             <div className="summary-row"><span>이월금액</span><span>{carryOver.toLocaleString()}원</span></div>
             <div className="summary-row"><span>총 입금</span><span className="plus">+{totalIn.toLocaleString()}원</span></div>
@@ -185,6 +248,7 @@ export default function Home() {
 
         </>}
 
+        {/* 비밀번호 */}
         <div className="footer">
           <input
             type="password"
