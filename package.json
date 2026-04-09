@@ -1,5 +1,5 @@
 {
-  "name": "insa-app",
+  "name": "hello-app",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -8,9 +8,8 @@
     "start": "next start"
   },
   "dependencies": {
-    "next": "18.2.0",
-    "react": "^19",
-    "react-dom": "^18",
-    "firebase": "^10.7.0"
+    "next": "15.2.4",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
   }
 }
