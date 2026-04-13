@@ -424,7 +424,7 @@ export default function Home() {
               </div>
 
 <div className="frame-header">
-  <div className="frame-title-member"></div>
+  <div className="frame-title-member">👥 회원목록</div>
   {isAdmin && <button className="add-btn" style={{background:"#6f42c1"}} onClick={() => setShowMemberForm(!showMemberForm)}>+</button>}
 </div>
 
