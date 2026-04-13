@@ -16,12 +16,10 @@ const firebaseConfig = {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 const db = getFirestore(app);
 
-const FAKE_CHARS = ["가","나","다","라","마","바","사","아","자","차","강","김","박","최","정","윤","장","임","한","오","서","신","권","황","송","류","전","홍","고","문","양","손","배","조","백","허","유","남","심","노","곽","성","태","준","민","수","지","현","영"];
-
 // 겹치지 않게 위치 배정
-function placeNoOverlap(count, areaW, areaH, itemW, itemH, margin = 10) {
+function placeNoOverlap(count, areaW, areaH, itemW, itemH, margin = 18) {
   const placed = [];
-  const maxTry = 300;
+  const maxTry = 500;
   for (let i = 0; i < count; i++) {
     let x, y, tries = 0, ok = false;
     while (tries < maxTry) {
@@ -44,13 +42,11 @@ export default function LoginPage() {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [gameData, setGameData] = useState(null);
-  const [answered, setAnswered] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const [failAnim, setFailAnim] = useState(false);
-  const [usedChip, setUsedChip] = useState(null);
-  const areaRef = useRef(null);
+  // 각 ○의 채워짐 상태: { memberIdx: char | null }
+  const [filled, setFilled] = useState({});
+  const [allDone, setAllDone] = useState(false);
+  const [failIdx, setFailIdx] = useState(null);
 
-  // 드래그 상태
   const dragChar = useRef("");
   const dragChipId = useRef(null);
   const touchCloneRef = useRef(null);
@@ -71,47 +67,73 @@ export default function LoginPage() {
 
   const initGame = useCallback(() => {
     if (members.length === 0) return;
+
     const areaW = Math.min(window.innerWidth, 480);
-    const areaH = window.innerHeight - 180;
+    const areaH = window.innerHeight;
 
-    // 랜덤 정답 회원 선택
-    const target = members[Math.floor(Math.random() * members.length)];
-    const hiddenIdx = Math.floor(Math.random() * target.NAME.length);
-    const correctChar = target.NAME[hiddenIdx];
+    // 각 회원마다 히든 인덱스 랜덤 배정
+    const hiddenMap = members.map(m => ({
+      name: m.NAME,
+      hiddenIdx: Math.floor(Math.random() * m.NAME.length),
+      hiddenChar: ""
+    }));
+    hiddenMap.forEach(h => { h.hiddenChar = h.name[h.hiddenIdx]; });
 
-    // 오답 글자 풀
-    const fakePool = FAKE_CHARS.filter(c => c !== correctChar).sort(() => Math.random() - 0.5);
-    const chips = [
-      { id: "correct", char: correctChar, isCorrect: true },
-      ...fakePool.slice(0, 6).map((c, i) => ({ id: `fake${i}`, char: c, isCorrect: false }))
-    ].sort(() => Math.random() - 0.5);
+    // 드래그 칩: 히든 글자들 (중복 제거 후 셔플)
+    const uniqueChars = [...new Set(hiddenMap.map(h => h.hiddenChar))];
+    const chips = uniqueChars
+      .sort(() => Math.random() - 0.5)
+      .map((char, i) => ({ id: `chip_${i}`, char }));
 
-    // 이름 카드 위치 (위쪽 영역 절반)
-    const namePositions = placeNoOverlap(members.length, areaW - 80, areaH * 0.52, 70, 36, 8);
-    // 글자 칩 위치 (아래쪽 영역)
-    const chipPositions = placeNoOverlap(chips.length, areaW - 60, areaH * 0.42, 48, 48, 10)
-      .map(p => ({ x: p.x, y: p.y + areaH * 0.54 }));
+    // 이름 카드 위치: 상단 60% 영역
+    const nameAreaH = areaH * 0.58;
+    const namePositions = placeNoOverlap(
+      members.length, areaW - 100, nameAreaH - 80, 90, 40, 22
+    );
 
-    setGameData({ target, hiddenIdx, correctChar, chips, namePositions, chipPositions, areaH });
-    setAnswered(false);
-    setSuccess(false);
-    setUsedChip(null);
+    // 칩 위치: 하단 35% 영역
+    const chipAreaH = areaH * 0.32;
+    const chipPositions = placeNoOverlap(
+      chips.length, areaW - 60, chipAreaH, 48, 48, 14
+    ).map(p => ({ x: p.x, y: p.y + areaH * 0.62 }));
+
+    setGameData({ hiddenMap, chips, namePositions, chipPositions });
+    setFilled({});
+    setAllDone(false);
+    setFailIdx(null);
   }, [members]);
 
   useEffect(() => {
     if (members.length > 0) initGame();
   }, [members, initGame]);
 
-  function checkAnswer(char, chipId) {
-    if (answered) return;
-    if (char === gameData.correctChar) {
-      setAnswered(true);
-      setUsedChip(chipId);
-      setSuccess(true);
-      setTimeout(() => router.push("/ledger"), 1800);
+  function checkDrop(char, chipId, memberIdx) {
+    const { hiddenMap } = gameData;
+    const targetChar = hiddenMap[memberIdx].hiddenChar;
+
+    // 같은 글자면 어디든 OK, 아니면 해당 ○의 글자와 일치해야 OK
+    if (char === targetChar) {
+      const newFilled = { ...filled, [memberIdx]: char };
+      setFilled(newFilled);
+
+      // 칩 제거: 같은 글자의 모든 ○가 채워졌으면 칩 숨김
+      const allSameCharFilled = hiddenMap
+        .filter(h => h.hiddenChar === char)
+        .every((_, i) => {
+          const idx = hiddenMap.findIndex((h, ii) => h.hiddenChar === char && !newFilled[ii] && ii !== memberIdx);
+          return idx === -1;
+        });
+
+      // 전체 완료 체크
+      const total = hiddenMap.length;
+      const doneCount = Object.keys(newFilled).length;
+      if (doneCount >= total) {
+        setAllDone(true);
+        setTimeout(() => router.push("/ledger"), 1800);
+      }
     } else {
-      setFailAnim(true);
-      setTimeout(() => setFailAnim(false), 600);
+      setFailIdx(memberIdx);
+      setTimeout(() => setFailIdx(null), 600);
     }
   }
 
@@ -122,14 +144,12 @@ export default function LoginPage() {
     e.dataTransfer.effectAllowed = "move";
   }
   function onDragOver(e) { e.preventDefault(); }
-  function onDrop(e, memberName, idx) {
+  function onDragEnter(e) { e.currentTarget.classList.add("drag-over"); }
+  function onDragLeave(e) { e.currentTarget.classList.remove("drag-over"); }
+  function onDrop(e, memberIdx) {
     e.preventDefault();
-    if (memberName === gameData.target.NAME && idx === gameData.hiddenIdx) {
-      checkAnswer(dragChar.current, dragChipId.current);
-    } else {
-      setFailAnim(true);
-      setTimeout(() => setFailAnim(false), 600);
-    }
+    e.currentTarget.classList.remove("drag-over");
+    checkDrop(dragChar.current, dragChipId.current, memberIdx);
   }
 
   // 터치 (모바일)
@@ -138,9 +158,9 @@ export default function LoginPage() {
     touchChipId.current = chipId;
     touchCharRef.current = char;
     const t = e.touches[0];
-    const el = e.currentTarget;
-    const clone = el.cloneNode(true);
-    clone.style.cssText = `position:fixed;width:48px;height:48px;opacity:0.85;z-index:999;pointer-events:none;border-radius:50%;background:#0f3460;border:2px solid #e94560;color:white;font-size:20px;font-weight:bold;display:flex;align-items:center;justify-content:center;left:${t.clientX-24}px;top:${t.clientY-24}px;`;
+    const clone = document.createElement("div");
+    clone.textContent = char;
+    clone.style.cssText = `position:fixed;width:48px;height:48px;border-radius:50%;background:#0f3460;border:2px solid #e94560;color:white;font-size:20px;font-weight:bold;display:flex;align-items:center;justify-content:center;left:${t.clientX-24}px;top:${t.clientY-24}px;z-index:999;pointer-events:none;line-height:48px;text-align:center;`;
     document.body.appendChild(clone);
     touchCloneRef.current = clone;
   }
@@ -151,34 +171,37 @@ export default function LoginPage() {
       touchCloneRef.current.style.left = (t.clientX - 24) + "px";
       touchCloneRef.current.style.top = (t.clientY - 24) + "px";
     }
+    document.querySelectorAll(".hole").forEach(el => el.classList.remove("drag-over"));
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    if (el && el.classList.contains("hole")) el.classList.add("drag-over");
   }
   function onTouchEnd(e) {
     if (touchCloneRef.current) { touchCloneRef.current.remove(); touchCloneRef.current = null; }
+    document.querySelectorAll(".hole").forEach(el => el.classList.remove("drag-over"));
     const t = e.changedTouches[0];
     const el = document.elementFromPoint(t.clientX, t.clientY);
-    if (el && el.dataset.member && el.dataset.hiddenidx !== undefined) {
-      const memberName = el.dataset.member;
-      const idx = Number(el.dataset.hiddenidx);
-      if (memberName === gameData.target.NAME && idx === gameData.hiddenIdx) {
-        checkAnswer(touchCharRef.current, touchChipId.current);
-      } else {
-        setFailAnim(true);
-        setTimeout(() => setFailAnim(false), 600);
-      }
+    if (el && el.dataset.memberidx !== undefined) {
+      checkDrop(touchCharRef.current, touchChipId.current, Number(el.dataset.memberidx));
     }
     touchChipId.current = null;
     touchCharRef.current = "";
   }
 
   if (loading) return (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#1a1a2e",color:"#aaa",fontFamily:"'Noto Sans KR',sans-serif"}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:"#1a1a2e",color:"#aaa",fontFamily:"'Noto Sans KR',sans-serif",fontSize:"16px"}}>
       불러오는 중...
     </div>
   );
-
   if (!gameData) return null;
 
-  const { target, hiddenIdx, chips, namePositions, chipPositions, areaH } = gameData;
+  const { hiddenMap, chips, namePositions, chipPositions } = gameData;
+
+  // 아직 채워지지 않은 ○의 히든 글자 목록
+  const remainingChars = new Set(
+    hiddenMap
+      .filter((h, i) => !filled[i])
+      .map(h => h.hiddenChar)
+  );
 
   return (
     <>
@@ -187,81 +210,81 @@ export default function LoginPage() {
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Noto Sans KR', sans-serif; background: #1a1a2e; overflow: hidden; }
 
-        .login-wrap { position: relative; width: 100vw; overflow: hidden; }
+        .top-label { position: fixed; top: 14px; left: 0; right: 0; text-align: center; pointer-events: none; z-index: 10; }
+        .top-label-sub { font-size: 11px; color: #444; letter-spacing: 2px; }
+        .top-label-main { font-size: 13px; color: #666; margin-top: 3px; }
 
-        /* 상단 타이틀 */
-        .login-title { position: fixed; top: 16px; left: 0; right: 0; text-align: center; z-index: 10; pointer-events: none; }
-        .login-title-sub { font-size: 11px; color: #555; letter-spacing: 2px; }
-        .login-title-main { font-size: 16px; color: #888; margin-top: 2px; }
+        /* 구분선 */
+        .divider { position: fixed; left: 0; right: 0; height: 1px; background: #222; z-index: 5; }
 
-        /* 이름 카드 */
-        .name-card { position: absolute; display: flex; gap: 4px; cursor: default; }
-        .name-char { width: 34px; height: 34px; border-radius: 8px; background: #16213e; border: 1px solid #2a3a5e; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: bold; color: #ccc; }
-        .name-char.hole {
-          border: 2px dashed #e94560;
-          background: #0f3460;
-          color: transparent;
-          cursor: pointer;
-          transition: all 0.15s;
-        }
-        .name-char.hole.drag-over { border-color: #fff; background: #1a5090; transform: scale(1.15); }
-        .name-char.hole.correct { border: 2px solid #28a745; background: #1a4a2e; color: #5dff8f; animation: pop 0.3s ease; }
+        .name-card { position: absolute; display: flex; gap: 3px; }
+        .name-char { width: 32px; height: 32px; border-radius: 7px; background: #16213e; border: 1px solid #2a3a5e; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: bold; color: #aaa; }
+        .hole { border: 2px dashed #e94560 !important; background: #0f3460 !important; color: transparent; cursor: pointer; transition: all 0.15s; }
+        .hole.drag-over { border-color: #fff !important; background: #1a5090 !important; transform: scale(1.15); }
+        .hole.correct { border: 2px solid #28a745 !important; background: #1a4a2e !important; color: #5dff8f !important; animation: pop 0.3s ease; }
+        .hole.fail { animation: shake 0.5s ease; }
         @keyframes pop { 0%{transform:scale(0.8)} 60%{transform:scale(1.2)} 100%{transform:scale(1)} }
+        @keyframes shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-6px)} 40%{transform:translateX(6px)} 60%{transform:translateX(-4px)} 80%{transform:translateX(4px)} }
 
-        /* 글자 칩 */
-        .chip { position: absolute; width: 48px; height: 48px; border-radius: 50%; background: #0f3460; border: 2px solid #e94560; color: white; font-size: 20px; font-weight: bold; display: flex; align-items: center; justify-content: center; cursor: grab; touch-action: none; transition: box-shadow 0.15s, opacity 0.15s; }
-        .chip:active { transform: scale(1.15); box-shadow: 0 8px 24px rgba(233,69,96,0.5); }
-        .chip.used { opacity: 0; pointer-events: none; }
+        .chip { position: absolute; width: 46px; height: 46px; border-radius: 50%; background: #0f3460; border: 2px solid #e94560; color: white; font-size: 19px; font-weight: bold; display: flex; align-items: center; justify-content: center; cursor: grab; touch-action: none; transition: opacity 0.2s, box-shadow 0.15s; }
+        .chip:active { transform: scale(1.15); box-shadow: 0 6px 20px rgba(233,69,96,0.5); }
+        .chip.used { opacity: 0 !important; pointer-events: none; }
 
-        /* 실패 흔들기 */
-        .shake { animation: shake 0.5s ease; }
-        @keyframes shake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-8px)} 40%{transform:translateX(8px)} 60%{transform:translateX(-6px)} 80%{transform:translateX(6px)} }
-
-        /* 성공 */
-        .success-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.88); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; animation: fadeIn 0.3s ease; }
+        .success-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; animation: fadeIn 0.3s ease; }
         @keyframes fadeIn { from{opacity:0} to{opacity:1} }
-        .success-text { color: #5dff8f; font-size: 26px; font-weight: bold; margin-bottom: 10px; }
-        .success-sub { color: #aaa; font-size: 14px; }
+        .success-text { color: #5dff8f; font-size: 26px; font-weight: bold; margin-bottom: 10px; animation: pop 0.4s ease; }
+        .success-sub { color: #888; font-size: 14px; }
 
-        /* 새 문제 버튼 */
-        .retry-btn { position: fixed; bottom: 20px; right: 20px; background: none; border: 1px solid #333; color: #666; border-radius: 20px; padding: 6px 16px; font-size: 12px; cursor: pointer; font-family: inherit; z-index: 10; }
-        .retry-btn:hover { border-color: #666; color: #aaa; }
+        .retry-btn { position: fixed; bottom: 18px; right: 18px; background: none; border: 1px solid #333; color: #555; border-radius: 20px; padding: 6px 16px; font-size: 12px; cursor: pointer; font-family: inherit; z-index: 10; }
+        .retry-btn:hover { border-color: #666; color: #999; }
+
+        /* 진행률 */
+        .progress { position: fixed; top: 52px; left: 50%; transform: translateX(-50%); display: flex; gap: 5px; z-index: 10; }
+        .progress-dot { width: 7px; height: 7px; border-radius: 50%; background: #333; transition: background 0.3s; }
+        .progress-dot.done { background: #28a745; }
       `}</style>
 
-      <div className="login-title">
-        <div className="login-title-sub">Simple Ledger91</div>
-        <div className="login-title-main">회원을 찾아 ○에 글자를 맞춰보세요</div>
+      <div className="top-label">
+        <div className="top-label-sub">Simple Ledger91</div>
+        <div className="top-label-main">○ 안에 알맞은 글자를 드래그하세요</div>
       </div>
 
-      <div
-        ref={areaRef}
-        className="login-wrap"
-        style={{ height: `${areaH + 80}px`, paddingTop: "60px" }}
-      >
+      {/* 진행률 도트 */}
+      <div className="progress">
+        {hiddenMap.map((_, i) => (
+          <div key={i} className={`progress-dot${filled[i] ? " done" : ""}`} />
+        ))}
+      </div>
+
+      {/* 구분선 */}
+      <div className="divider" style={{ top: `${window.innerHeight * 0.6}px` }} />
+
+      <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden" }}>
+
         {/* 이름 카드들 */}
         {members.map((m, mi) => {
           const pos = namePositions[mi] || { x: 0, y: 0 };
-          const isTarget = m.NAME === target.NAME;
+          const { hiddenIdx, hiddenChar } = hiddenMap[mi];
+          const isFilled = !!filled[mi];
           return (
             <div
-              key={m.NAME + mi}
+              key={mi}
               className="name-card"
-              style={{ left: pos.x + "px", top: (pos.y + 60) + "px" }}
+              style={{ left: (pos.x + 10) + "px", top: (pos.y + 64) + "px" }}
             >
               {m.NAME.split("").map((ch, ci) => {
-                const isHole = isTarget && ci === hiddenIdx;
+                const isHole = ci === hiddenIdx;
                 return (
                   <div
                     key={ci}
-                    className={`name-char${isHole ? " hole" + (success ? " correct" : "") : ""}`}
-                    data-member={isTarget ? m.NAME : ""}
-                    data-hiddenidx={isTarget ? hiddenIdx : ""}
-                    onDragOver={isHole ? onDragOver : undefined}
-                    onDrop={isHole ? (e) => onDrop(e, m.NAME, ci) : undefined}
-                    onDragLeave={isHole ? (e) => e.currentTarget.classList.remove("drag-over") : undefined}
-                    onDragEnter={isHole ? (e) => e.currentTarget.classList.add("drag-over") : undefined}
+                    className={`name-char${isHole ? " hole" + (isFilled ? " correct" : "") + (failIdx === mi ? " fail" : "") : ""}`}
+                    data-memberidx={isHole ? mi : undefined}
+                    onDragOver={isHole && !isFilled ? onDragOver : undefined}
+                    onDragEnter={isHole && !isFilled ? onDragEnter : undefined}
+                    onDragLeave={isHole && !isFilled ? onDragLeave : undefined}
+                    onDrop={isHole && !isFilled ? (e) => onDrop(e, mi) : undefined}
                   >
-                    {isHole ? (success ? gameData.correctChar : "") : ch}
+                    {isHole ? (isFilled ? filled[mi] : "") : ch}
                   </div>
                 );
               })}
@@ -272,12 +295,13 @@ export default function LoginPage() {
         {/* 글자 칩들 */}
         {chips.map((chip, ci) => {
           const pos = chipPositions[ci] || { x: 0, y: 0 };
+          const isUsed = !remainingChars.has(chip.char);
           return (
             <div
               key={chip.id}
-              className={`chip${usedChip === chip.id ? " used" : ""}${failAnim ? " shake" : ""}`}
+              className={`chip${isUsed ? " used" : ""}`}
               style={{ left: pos.x + "px", top: pos.y + "px" }}
-              draggable
+              draggable={!isUsed}
               onDragStart={(e) => onDragStart(e, chip.char, chip.id)}
               onTouchStart={(e) => onTouchStart(e, chip.char, chip.id)}
               onTouchMove={onTouchMove}
@@ -289,14 +313,14 @@ export default function LoginPage() {
         })}
       </div>
 
-      {success && (
+      {allDone && (
         <div className="success-overlay">
           <div className="success-text">✓ 확인되었습니다</div>
-          <div className="success-sub">{target.NAME} 님, 이동 중...</div>
+          <div className="success-sub">이동 중...</div>
         </div>
       )}
 
-      <button className="retry-btn" onClick={initGame}>↺ 다른 문제</button>
+      <button className="retry-btn" onClick={initGame}>↺ 새로고침</button>
     </>
   );
 }
