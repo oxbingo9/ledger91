@@ -1,6 +1,3 @@
-
-
-
 "use client";
 import { useEffect, useState } from "react";
 import { initializeApp, getApps } from "firebase/app";
@@ -21,6 +18,7 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0
 const db = getFirestore(app);
 
 const EMPTY_FORM = { date: "", desc: "", amt: "" };
+const EMPTY_INSA_FORM = { year: "", chairman: "", secretary: "", pwd: "", carryover: "" };
 
 export default function Home() {
   const currentYear = new Date().getFullYear();
@@ -38,6 +36,11 @@ export default function Home() {
   const [outForm, setOutForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
+  // 새 insa 등록 폼
+  const [showInsaForm, setShowInsaForm] = useState(false);
+  const [insaForm, setInsaForm] = useState(EMPTY_INSA_FORM);
+  const [savingInsa, setSavingInsa] = useState(false);
+
   useEffect(() => {
     async function fetchInsa() {
       setLoading(true);
@@ -53,7 +56,6 @@ export default function Home() {
   async function fetchItems() {
     try {
       const snapshot = await getDocs(collection(db, "data"));
-      // doc ID도 함께 저장
       const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       const filtered = all.filter(item => String(item.DATE).includes(selectedYear));
       filtered.sort((a, b) => new Date(a.DATE) - new Date(b.DATE));
@@ -106,6 +108,36 @@ export default function Home() {
     } catch (e) { alert("삭제 실패: " + e.message); }
   }
 
+  async function handleInsaSave() {
+    const { year, chairman, secretary, pwd } = insaForm;
+    if (!year || !chairman || !secretary || !pwd) {
+      alert("년도, 회장, 총무, 비밀번호를 모두 입력해주세요."); return;
+    }
+    if (isNaN(Number(year)) || Number(year) < 2000 || Number(year) > 2100) {
+      alert("올바른 년도를 입력해주세요."); return;
+    }
+
+    // 중복 체크
+    setSavingInsa(true);
+    try {
+      const snapshot = await getDocs(query(collection(db, "insa"), where("YEAR", "==", Number(year))));
+      if (!snapshot.empty) {
+        alert(`${year}년 데이터가 이미 존재합니다.`); return;
+      }
+      await addDoc(collection(db, "insa"), {
+        YEAR: Number(year),
+        CHAIRMAN: chairman,
+        SECRETARY: secretary,
+        PWD: pwd,
+        CARRYOVER: Number(String(insaForm.carryover || "0").replace(/,/g, "")),
+      });
+      alert(`${year}년 인사 데이터가 등록되었습니다.`);
+      setInsaForm(EMPTY_INSA_FORM);
+      setShowInsaForm(false);
+    } catch (e) { alert("저장 실패: " + e.message); }
+    finally { setSavingInsa(false); }
+  }
+
   const inItems = items.filter(i => i.TYPE === "입금");
   const outItems = items.filter(i => i.TYPE === "출금");
   const totalIn = inItems.reduce((s, i) => s + Number(i.AMT || 0), 0);
@@ -153,6 +185,14 @@ export default function Home() {
         .btn-save { flex: 1; background: #007bff; color: white; border: none; border-radius: 6px; padding: 10px; font-size: 14px; font-family: inherit; cursor: pointer; }
         .btn-cancel { flex: 1; background: #eee; color: #555; border: none; border-radius: 6px; padding: 10px; font-size: 14px; font-family: inherit; cursor: pointer; }
         .btn-save:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        /* 인사 등록 폼 */
+        .footer-row { display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .insa-add-btn { background: #6c757d; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; font-size: 20px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .insa-form { background: white; border-radius: 12px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-top: 15px; text-align: left; }
+        .insa-form-title { font-weight: bold; color: #6c757d; margin-bottom: 12px; font-size: 14px; }
+        .insa-form input { width: 100%; padding: 9px 10px; margin-bottom: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; font-family: inherit; }
+        .insa-form input:last-of-type { margin-bottom: 0; }
       `}</style>
 
       <div className="wrap">
@@ -272,15 +312,69 @@ export default function Home() {
 
         </>}
 
-        {/* 비밀번호 */}
+        {/* 비밀번호 + 인사등록 버튼 */}
         <div className="footer">
-          <input
-            type="password"
-            placeholder="비밀번호"
-            value={pw}
-            onChange={e => checkAdmin(e.target.value)}
-          />
+          <div className="footer-row">
+            <input
+              type="password"
+              placeholder="비밀번호"
+              value={pw}
+              onChange={e => checkAdmin(e.target.value)}
+            />
+            {isAdmin && (
+              <button
+                className="insa-add-btn"
+                onClick={() => { setShowInsaForm(!showInsaForm); setInsaForm(EMPTY_INSA_FORM); }}
+                title="새 연도 인사 등록"
+              >+</button>
+            )}
+          </div>
           {isAdmin && <p style={{marginTop:"10px", color:"#28a745", fontSize:"13px"}}>✅ 관리자 모드</p>}
+
+          {/* 인사 등록 폼 */}
+          {isAdmin && showInsaForm && (
+            <div className="insa-form">
+              <div className="insa-form-title">📋 새 연도 인사 등록</div>
+              <input
+                type="number"
+                placeholder="년도 (예: 2026)"
+                value={insaForm.year}
+                onChange={e => setInsaForm({...insaForm, year: e.target.value})}
+              />
+              <input
+                type="text"
+                placeholder="회장 이름"
+                value={insaForm.chairman}
+                onChange={e => setInsaForm({...insaForm, chairman: e.target.value})}
+              />
+              <input
+                type="text"
+                placeholder="총무 이름"
+                value={insaForm.secretary}
+                onChange={e => setInsaForm({...insaForm, secretary: e.target.value})}
+              />
+              <input
+                type="number"
+                placeholder="이월금액 (없으면 0)"
+                value={insaForm.carryover}
+                onChange={e => setInsaForm({...insaForm, carryover: e.target.value})}
+              />
+              <input
+                type="password"
+                placeholder="새 비밀번호"
+                value={insaForm.pwd}
+                onChange={e => setInsaForm({...insaForm, pwd: e.target.value})}
+              />
+              <div className="form-btns" style={{marginTop:"10px"}}>
+                <button className="btn-save" onClick={handleInsaSave} disabled={savingInsa}>
+                  {savingInsa ? "저장중..." : "등록"}
+                </button>
+                <button className="btn-cancel" onClick={() => { setShowInsaForm(false); setInsaForm(EMPTY_INSA_FORM); }}>
+                  취소
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>
