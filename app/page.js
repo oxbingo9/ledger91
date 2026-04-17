@@ -43,6 +43,7 @@ export default function Home() {
   const [showInsaForm, setShowInsaForm] = useState(false);
   const [insaForm, setInsaForm] = useState(EMPTY_INSA_FORM);
   const [savingInsa, setSavingInsa] = useState(false);
+  const [weather, setWeather] = useState(null);
 
   // 회원명부
   const [members, setMembers] = useState([]);
@@ -74,7 +75,27 @@ export default function Home() {
   }
 
   useEffect(() => { fetchItems(); }, [selectedYear]);
-
+useEffect(() => {
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    try {
+      const { latitude, longitude } = pos.coords;
+      const res = await fetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weathercode&timezone=auto`
+      );
+      const data = await res.json();
+      const code = data.current.weathercode;
+      const temp = Math.round(data.current.temperature_2m);
+      const icon =
+        code === 0 ? "☀️" :
+        code <= 3 ? "⛅" :
+        code <= 48 ? "☁️" :
+        code <= 67 ? "🌧️" :
+        code <= 77 ? "❄️" :
+        code <= 82 ? "🌦️" : "⛈️";
+      setWeather({ icon, temp });
+    } catch (e) { console.error(e); }
+  });
+}, []);
   async function fetchMembers() {
     setMembersLoading(true);
     try {
@@ -287,12 +308,20 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="frame">
-                <span style={{fontWeight:"bold", color:"#666", marginRight:"10px"}}>기준년도</span>
-                <select value={selectedYear} onChange={e => { setSelectedYear(e.target.value); setIsAdmin(false); setPw(""); setShowInForm(false); setShowOutForm(false); }}>
-                  {years.map(y => <option key={y} value={String(y)}>{y}년</option>)}
-                </select>
-              </div>
+<div className="frame" style={{display:"flex", alignItems:"center", justifyContent:"space-between"}}>
+  <div style={{display:"flex", alignItems:"center"}}>
+    <span style={{fontWeight:"bold", color:"#666", marginRight:"10px"}}>기준년도</span>
+    <select value={selectedYear} onChange={e => { setSelectedYear(e.target.value); setIsAdmin(false); setPw(""); setShowInForm(false); setShowOutForm(false); }}>
+      {years.map(y => <option key={y} value={String(y)}>{y}년</option>)}
+    </select>
+  </div>
+  {weather && (
+    <div style={{display:"flex", alignItems:"center", gap:"4px"}}>
+      <span style={{fontSize:"20px"}}>{weather.icon}</span>
+      <span style={{fontSize:"15px", fontWeight:"bold", color:"#555"}}>{weather.temp}°C</span>
+    </div>
+  )}
+</div>
 
               {loading ? <div className="loading">불러오는 중...</div> : <>
                 <div className="frame">
