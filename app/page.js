@@ -333,7 +333,7 @@ export default function Home() {
         .deleted-row { opacity: 0.5; }
         .deleted-row td { text-decoration: line-through; color: #999; }
         .col-actions { width: 60px; text-align: center; }
-      `}/* 인쇄용 스타일 */
+        /* 인쇄용 스타일 */
 @media print {
   body { background: white !important; }
   .no-print { display: none !important; }
@@ -349,7 +349,8 @@ export default function Home() {
 }
 .print-header { display: none; text-align: center; margin-bottom: 20px; }
 .pdf-btn { width: 100%; padding: 12px; background: #495057; color: white; border: none; border-radius: 8px; font-size: 14px; font-family: inherit; cursor: pointer; margin-bottom: 10px; }
-.pdf-btn:hover { background: #343a40; }</style>
+.pdf-btn:hover { background: #343a40; }
+      `}</style>
 
       <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} style={{overflow: "hidden"}}>
         <div className="slider-wrap" style={{transform: `translateX(${page === 0 ? "0" : "-50%"})`}}>
