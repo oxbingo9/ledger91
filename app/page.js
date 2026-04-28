@@ -333,7 +333,23 @@ export default function Home() {
         .deleted-row { opacity: 0.5; }
         .deleted-row td { text-decoration: line-through; color: #999; }
         .col-actions { width: 60px; text-align: center; }
-      `}</style>
+      `}/* 인쇄용 스타일 */
+@media print {
+  body { background: white !important; }
+  .no-print { display: none !important; }
+  .slider-wrap { transform: none !important; width: 100% !important; display: block !important; }
+  .slide { display: none; width: 100% !important; }
+  .slide:first-child { display: block !important; }
+  .frame { box-shadow: none !important; border: 1px solid #ddd; }
+  .footer { display: none !important; }
+  .page-dots { display: none !important; }
+  .deleted-section { display: none !important; }
+  .add-btn { display: none !important; }
+  .print-header { display: block !important; }
+}
+.print-header { display: none; text-align: center; margin-bottom: 20px; }
+.pdf-btn { width: 100%; padding: 12px; background: #495057; color: white; border: none; border-radius: 8px; font-size: 14px; font-family: inherit; cursor: pointer; margin-bottom: 10px; }
+.pdf-btn:hover { background: #343a40; }</style>
 
       <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} style={{overflow: "hidden"}}>
         <div className="slider-wrap" style={{transform: `translateX(${page === 0 ? "0" : "-50%"})`}}>
@@ -509,7 +525,25 @@ export default function Home() {
                   <div className="summary-row balance"><span>현재잔액</span><span>{balance.toLocaleString()}원</span></div>
                 </div>
               </>}
+{/* 인쇄용 헤더 (화면엔 숨김, 인쇄시만 표시) */}
+<div className="print-header">
+  <div style={{fontSize:"20px", fontWeight:"bold"}}>구일회 {selectedYear}년 회비장부</div>
+  <div style={{fontSize:"13px", color:"#666", marginTop:"4px"}}>
+    회장: {insa ? insa.CHAIRMAN : "-"} &nbsp;|&nbsp; 총무: {insa ? insa.SECRETARY : "-"}
+  </div>
+  <div style={{fontSize:"12px", color:"#aaa", marginTop:"2px"}}>
+    출력일: {new Date().toLocaleDateString("ko-KR")}
+  </div>
+</div>
 
+{/* PDF 저장 버튼 */}
+{!loading && (
+  <div style={{marginBottom:"10px"}}>
+    <button className="pdf-btn" onClick={() => window.print()}>
+      📄 {selectedYear}년 장부 PDF 저장
+    </button>
+  </div>
+)}
               <div className="footer">
                 <div className="footer-row">
                   <input type="password" placeholder="비밀번호" value={pw} onChange={e => checkAdmin(e.target.value)} />
