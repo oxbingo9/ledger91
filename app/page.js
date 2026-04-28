@@ -1,8 +1,7 @@
-
 "use client";
 import { useEffect, useState, useRef } from "react";
 import { initializeApp, getApps } from "firebase/app";
-import { getFirestore, collection, getDocs, addDoc, deleteDoc, doc, query, where } from "firebase/firestore";
+import { getFirestore, collection, getDocs, addDoc, deleteDoc, doc, query, where, updateDoc } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBi82idZAraoDMEMVBhVv66tURB0lSI0UM",
@@ -26,7 +25,7 @@ export default function Home() {
   const currentYear = new Date().getFullYear();
   const years = [currentYear, currentYear-1, currentYear-2, currentYear-3];
 
-  const [page, setPage] = useState(0); // 0: 장부, 1: 회원명부
+  const [page, setPage] = useState(0);
   const touchStartX = useRef(null);
 
   const [selectedYear, setSelectedYear] = useState(String(currentYear));
@@ -44,13 +43,14 @@ export default function Home() {
   const [insaForm, setInsaForm] = useState(EMPTY_INSA_FORM);
   const [savingInsa, setSavingInsa] = useState(false);
   const [weather, setWeather] = useState(null);
+  const [showDeleted, setShowDeleted] = useState(false); // ← 삭제 항목 보기 토글
 
-  // 회원명부
   const [members, setMembers] = useState([]);
   const [membersLoading, setMembersLoading] = useState(true);
   const [showMemberForm, setShowMemberForm] = useState(false);
   const [memberForm, setMemberForm] = useState(EMPTY_MEMBER_FORM);
   const [savingMember, setSavingMember] = useState(false);
+  const [showDeletedMembers, setShowDeletedMembers] = useState(false); // ← 회원 삭제 항목 토글
 
   useEffect(() => {
     async function fetchInsa() {
@@ -75,27 +75,29 @@ export default function Home() {
   }
 
   useEffect(() => { fetchItems(); }, [selectedYear]);
-useEffect(() => {
-  async function fetchWeather() {
-    try {
-      const res = await fetch(
-        `https://api.open-meteo.com/v1/forecast?latitude=37.5665&longitude=126.9780&current=temperature_2m,weathercode&timezone=Asia/Seoul`
-      );
-      const data = await res.json();
-      const code = data.current.weathercode;
-      const temp = Math.round(data.current.temperature_2m);
-      const icon =
-        code === 0 ? "☀️" :
-        code <= 3 ? "⛅" :
-        code <= 48 ? "☁️" :
-        code <= 67 ? "🌧️" :
-        code <= 77 ? "❄️" :
-        code <= 82 ? "🌦️" : "⛈️";
-      setWeather({ icon, temp });
-    } catch (e) { console.error(e); }
-  }
-  fetchWeather();
-}, []);
+
+  useEffect(() => {
+    async function fetchWeather() {
+      try {
+        const res = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=37.5665&longitude=126.9780&current=temperature_2m,weathercode&timezone=Asia/Seoul`
+        );
+        const data = await res.json();
+        const code = data.current.weathercode;
+        const temp = Math.round(data.current.temperature_2m);
+        const icon =
+          code === 0 ? "☀️" :
+          code <= 3 ? "⛅" :
+          code <= 48 ? "☁️" :
+          code <= 67 ? "🌧️" :
+          code <= 77 ? "❄️" :
+          code <= 82 ? "🌦️" : "⛈️";
+        setWeather({ icon, temp });
+      } catch (e) { console.error(e); }
+    }
+    fetchWeather();
+  }, []);
+
   async function fetchMembers() {
     setMembersLoading(true);
     try {
@@ -136,6 +138,7 @@ useEffect(() => {
         TYPE: type,
         DESC: form.desc,
         AMT: Number(String(form.amt).replace(/,/g, "")),
+        DELETED: false,
       });
       if (type === "입금") { setInForm(EMPTY_FORM); setShowInForm(false); }
       else { setOutForm(EMPTY_FORM); setShowOutForm(false); }
@@ -144,8 +147,26 @@ useEffect(() => {
     finally { setSaving(false); }
   }
 
+  // ↓ 소프트 삭제: 실제 삭제 대신 DELETED: true 표시
   async function handleDelete(id) {
-    if (!confirm("삭제하시겠습니까?")) return;
+    if (!confirm("삭제하시겠습니까?\n(관리자가 복원할 수 있습니다)")) return;
+    try {
+      await updateDoc(doc(db, "data", id), { DELETED: true });
+      await fetchItems();
+    } catch (e) { alert("삭제 실패: " + e.message); }
+  }
+
+  // ↓ 복원
+  async function handleRestore(id) {
+    try {
+      await updateDoc(doc(db, "data", id), { DELETED: false });
+      await fetchItems();
+    } catch (e) { alert("복원 실패: " + e.message); }
+  }
+
+  // ↓ 영구 삭제 (관리자 전용)
+  async function handleHardDelete(id) {
+    if (!confirm("영구 삭제합니다. 복원 불가능합니다. 계속하시겠습니까?")) return;
     try {
       await deleteDoc(doc(db, "data", id));
       await fetchItems();
@@ -188,6 +209,7 @@ useEffect(() => {
         BIRTHDAY: birthday,
         PHONE: phone,
         EMERGENCY: emergency,
+        DELETED: false,
       });
       setMemberForm(EMPTY_MEMBER_FORM);
       setShowMemberForm(false);
@@ -197,14 +219,28 @@ useEffect(() => {
   }
 
   async function handleMemberDelete(id) {
-    if (!confirm("삭제하시겠습니까?")) return;
+    if (!confirm("삭제하시겠습니까?\n(관리자가 복원할 수 있습니다)")) return;
+    try {
+      await updateDoc(doc(db, "members", id), { DELETED: true });
+      await fetchMembers();
+    } catch (e) { alert("삭제 실패: " + e.message); }
+  }
+
+  async function handleMemberRestore(id) {
+    try {
+      await updateDoc(doc(db, "members", id), { DELETED: false });
+      await fetchMembers();
+    } catch (e) { alert("복원 실패: " + e.message); }
+  }
+
+  async function handleMemberHardDelete(id) {
+    if (!confirm("영구 삭제합니다. 복원 불가능합니다. 계속하시겠습니까?")) return;
     try {
       await deleteDoc(doc(db, "members", id));
       await fetchMembers();
     } catch (e) { alert("삭제 실패: " + e.message); }
   }
 
-  // 스와이프 핸들러
   function onTouchStart(e) { touchStartX.current = e.touches[0].clientX; }
   function onTouchEnd(e) {
     if (touchStartX.current === null) return;
@@ -216,12 +252,19 @@ useEffect(() => {
     touchStartX.current = null;
   }
 
-  const inItems = items.filter(i => i.TYPE === "입금");
-  const outItems = items.filter(i => i.TYPE === "출금");
+  // 활성 항목만 (DELETED가 없거나 false)
+  const activeItems = items.filter(i => !i.DELETED);
+  const deletedItems = items.filter(i => i.DELETED);
+
+  const inItems = activeItems.filter(i => i.TYPE === "입금");
+  const outItems = activeItems.filter(i => i.TYPE === "출금");
   const totalIn = inItems.reduce((s, i) => s + Number(i.AMT || 0), 0);
   const totalOut = outItems.reduce((s, i) => s + Number(i.AMT || 0), 0);
   const carryOver = insa ? Number(insa.CARRYOVER || 0) : 0;
   const balance = carryOver + totalIn - totalOut;
+
+  const activeMembers = members.filter(m => !m.DELETED);
+  const deletedMembers = members.filter(m => m.DELETED);
 
   return (
     <>
@@ -252,6 +295,9 @@ useEffect(() => {
         .col-del { width: 30px; text-align: center; }
         .del-btn { background: none; border: none; color: #ccc; font-size: 16px; cursor: pointer; padding: 0; line-height: 1; }
         .del-btn:hover { color: #ff4d4d; }
+        .restore-btn { background: none; border: none; color: #28a745; font-size: 13px; cursor: pointer; padding: 0 4px; }
+        .hard-del-btn { background: none; border: none; color: #ccc; font-size: 13px; cursor: pointer; padding: 0 4px; }
+        .hard-del-btn:hover { color: #ff4d4d; }
         .plus { color: #28a745; }
         .minus { color: #dc3545; }
         .empty { color: #aaa; font-size: 12px; text-align: center; padding: 15px 0; }
@@ -271,27 +317,25 @@ useEffect(() => {
         .insa-form { background: white; border-radius: 12px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-top: 15px; text-align: left; }
         .insa-form-title { font-weight: bold; color: #6c757d; margin-bottom: 12px; font-size: 14px; }
         .insa-form input { width: 100%; padding: 9px 10px; margin-bottom: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; font-family: inherit; }
-
-        /* 페이지 인디케이터 */
         .page-dots { display: flex; justify-content: center; gap: 8px; padding: 10px 0 20px; }
         .dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; transition: background 0.3s; }
         .dot.active { background: #007bff; }
-
-        /* 회원명부 */
         .member-card { display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid #eee; gap: 12px; }
         .member-card:last-child { border-bottom: none; }
+        .member-card.deleted-card { opacity: 0.5; background: #fff8f8; border-radius: 8px; padding: 10px; }
         .member-avatar { width: 40px; height: 40px; border-radius: 50%; background: #e8e0f7; color: #6f42c1; font-weight: bold; font-size: 16px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .member-info { flex: 1; min-width: 0; }
         .member-name { font-weight: bold; font-size: 15px; }
         .member-detail { font-size: 12px; color: #888; margin-top: 2px; }
         .member-phone { font-size: 13px; color: #555; margin-top: 3px; }
+        .deleted-section { margin-top: 10px; border-top: 1px dashed #eee; padding-top: 10px; }
+        .deleted-toggle { background: none; border: none; color: #aaa; font-size: 12px; cursor: pointer; padding: 4px 0; text-decoration: underline; }
+        .deleted-row { opacity: 0.5; }
+        .deleted-row td { text-decoration: line-through; color: #999; }
+        .col-actions { width: 60px; text-align: center; }
       `}</style>
 
-      <div
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-        style={{overflow: "hidden"}}
-      >
+      <div onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} style={{overflow: "hidden"}}>
         <div className="slider-wrap" style={{transform: `translateX(${page === 0 ? "0" : "-50%"})`}}>
 
           {/* ── 슬라이드 1: 장부 ── */}
@@ -308,22 +352,24 @@ useEffect(() => {
                 </div>
               </div>
 
-<div className="frame" style={{display:"flex", alignItems:"center", justifyContent:"space-between"}}>
-  <div style={{display:"flex", alignItems:"center"}}>
-    <span style={{fontWeight:"bold", color:"#666", marginRight:"10px"}}>기준년도</span>
-    <select value={selectedYear} onChange={e => { setSelectedYear(e.target.value); setIsAdmin(false); setPw(""); setShowInForm(false); setShowOutForm(false); }}>
-      {years.map(y => <option key={y} value={String(y)}>{y}년</option>)}
-    </select>
-  </div>
-  {weather && (
-    <div style={{display:"flex", alignItems:"center", gap:"4px"}}>
-      <span style={{fontSize:"20px"}}>{weather.icon}</span>
-      <span style={{fontSize:"15px", fontWeight:"bold", color:"#555"}}>{weather.temp}°C</span>
-    </div>
-  )}
-</div>
+              <div className="frame" style={{display:"flex", alignItems:"center", justifyContent:"space-between"}}>
+                <div style={{display:"flex", alignItems:"center"}}>
+                  <span style={{fontWeight:"bold", color:"#666", marginRight:"10px"}}>기준년도</span>
+                  <select value={selectedYear} onChange={e => { setSelectedYear(e.target.value); setIsAdmin(false); setPw(""); setShowInForm(false); setShowOutForm(false); }}>
+                    {years.map(y => <option key={y} value={String(y)}>{y}년</option>)}
+                  </select>
+                </div>
+                {weather && (
+                  <div style={{display:"flex", alignItems:"center", gap:"4px"}}>
+                    <span style={{fontSize:"20px"}}>{weather.icon}</span>
+                    <span style={{fontSize:"15px", fontWeight:"bold", color:"#555"}}>{weather.temp}°C</span>
+                  </div>
+                )}
+              </div>
 
               {loading ? <div className="loading">불러오는 중...</div> : <>
+
+                {/* 입금내역 */}
                 <div className="frame">
                   <div className="frame-header">
                     <div className="frame-title-in">↓ 입금내역</div>
@@ -361,8 +407,35 @@ useEffect(() => {
                       }
                     </tbody>
                   </table>
+
+                  {/* 삭제된 입금 항목 */}
+                  {isAdmin && deletedItems.filter(i => i.TYPE === "입금").length > 0 && (
+                    <div className="deleted-section">
+                      <button className="deleted-toggle" onClick={() => setShowDeleted(!showDeleted)}>
+                        🗑 삭제된 항목 {deletedItems.filter(i => i.TYPE === "입금").length}건 {showDeleted ? "숨기기" : "보기"}
+                      </button>
+                      {showDeleted && (
+                        <table style={{marginTop:"8px"}}>
+                          <tbody>
+                            {deletedItems.filter(i => i.TYPE === "입금").map(item => (
+                              <tr key={item.id} className="deleted-row">
+                                <td className="col-date">{formatDate(item.DATE)}</td>
+                                <td className="col-desc">{item.DESC}</td>
+                                <td className="col-amt">{Number(item.AMT).toLocaleString()}</td>
+                                <td className="col-actions">
+                                  <button className="restore-btn" onClick={() => handleRestore(item.id)} title="복원">↩️</button>
+                                  <button className="hard-del-btn" onClick={() => handleHardDelete(item.id)} title="영구삭제">🗑</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
                 </div>
 
+                {/* 출금내역 */}
                 <div className="frame">
                   <div className="frame-header">
                     <div className="frame-title-out">↑ 출금내역</div>
@@ -400,8 +473,35 @@ useEffect(() => {
                       }
                     </tbody>
                   </table>
+
+                  {/* 삭제된 출금 항목 */}
+                  {isAdmin && deletedItems.filter(i => i.TYPE === "출금").length > 0 && (
+                    <div className="deleted-section">
+                      <button className="deleted-toggle" onClick={() => setShowDeleted(!showDeleted)}>
+                        🗑 삭제된 항목 {deletedItems.filter(i => i.TYPE === "출금").length}건 {showDeleted ? "숨기기" : "보기"}
+                      </button>
+                      {showDeleted && (
+                        <table style={{marginTop:"8px"}}>
+                          <tbody>
+                            {deletedItems.filter(i => i.TYPE === "출금").map(item => (
+                              <tr key={item.id} className="deleted-row">
+                                <td className="col-date">{formatDate(item.DATE)}</td>
+                                <td className="col-desc">{item.DESC}</td>
+                                <td className="col-amt">{Number(item.AMT).toLocaleString()}</td>
+                                <td className="col-actions">
+                                  <button className="restore-btn" onClick={() => handleRestore(item.id)} title="복원">↩️</button>
+                                  <button className="hard-del-btn" onClick={() => handleHardDelete(item.id)} title="영구삭제">🗑</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
                 </div>
 
+                {/* 잔액 요약 */}
                 <div className="frame">
                   <div className="summary-row"><span>이월금액</span><span>{carryOver.toLocaleString()}원</span></div>
                   <div className="summary-row"><span>총 입금</span><span className="plus">+{totalIn.toLocaleString()}원</span></div>
@@ -434,7 +534,6 @@ useEffect(() => {
                 )}
               </div>
 
-              {/* 페이지 인디케이터 */}
               <div className="page-dots">
                 <div className={`dot ${page === 0 ? "active" : ""}`} />
                 <div className={`dot ${page === 1 ? "active" : ""}`} />
@@ -450,17 +549,15 @@ useEffect(() => {
                   <div className="header-title">Simple Ledger91</div>
                   <div className="header-h1">회원명부</div>
                 </div>
-                <div style={{fontSize:"11px", color:"#888"}}>총 {members.length}명</div>
+                <div style={{fontSize:"11px", color:"#888"}}>총 {activeMembers.length}명</div>
               </div>
 
-<div className="frame">
-  {isAdmin && (
-    <div style={{textAlign:"right", marginBottom:"10px"}}>
-      <button className="add-btn" style={{background:"#6f42c1", marginLeft:"auto"}} onClick={() => setShowMemberForm(!showMemberForm)}>+</button>
-    </div>
-  )}
-
-  
+              <div className="frame">
+                {isAdmin && (
+                  <div style={{textAlign:"right", marginBottom:"10px"}}>
+                    <button className="add-btn" style={{background:"#6f42c1", marginLeft:"auto"}} onClick={() => setShowMemberForm(!showMemberForm)}>+</button>
+                  </div>
+                )}
                 {showMemberForm && (
                   <div className="input-form">
                     <input type="text" placeholder="이름 *" value={memberForm.name} onChange={e => setMemberForm({...memberForm, name: e.target.value})} />
@@ -476,9 +573,9 @@ useEffect(() => {
 
                 {membersLoading
                   ? <div className="loading">불러오는 중...</div>
-                  : members.length === 0
+                  : activeMembers.length === 0
                     ? <div className="empty" style={{padding:"20px 0"}}>회원 정보가 없습니다</div>
-                    : members.map(m => (
+                    : activeMembers.map(m => (
                       <div className="member-card" key={m.id}>
                         <div className="member-avatar">{(m.NAME || "?")[0]}</div>
                         <div className="member-info">
@@ -493,9 +590,28 @@ useEffect(() => {
                       </div>
                     ))
                 }
+
+                {/* 삭제된 회원 */}
+                {isAdmin && deletedMembers.length > 0 && (
+                  <div className="deleted-section">
+                    <button className="deleted-toggle" onClick={() => setShowDeletedMembers(!showDeletedMembers)}>
+                      🗑 삭제된 회원 {deletedMembers.length}명 {showDeletedMembers ? "숨기기" : "보기"}
+                    </button>
+                    {showDeletedMembers && deletedMembers.map(m => (
+                      <div className="member-card deleted-card" key={m.id}>
+                        <div className="member-avatar" style={{background:"#eee", color:"#aaa"}}>{(m.NAME || "?")[0]}</div>
+                        <div className="member-info">
+                          <div className="member-name" style={{textDecoration:"line-through", color:"#aaa"}}>{m.NAME}</div>
+                          <div className="member-phone" style={{color:"#ccc"}}>📱 {m.PHONE}</div>
+                        </div>
+                        <button className="restore-btn" onClick={() => handleMemberRestore(m.id)} title="복원">↩️</button>
+                        <button className="hard-del-btn" onClick={() => handleMemberHardDelete(m.id)} title="영구삭제">🗑</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* 페이지 인디케이터 */}
               <div className="page-dots">
                 <div className={`dot ${page === 0 ? "active" : ""}`} />
                 <div className={`dot ${page === 1 ? "active" : ""}`} />
